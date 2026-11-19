@@ -155,6 +155,8 @@ def _chat_uma_vez(modelo: str, usuario: str, cancelar: Callable[[], None], max_t
     corpo = {"model": modelo, "stream": True, "keep_alive": "10m",
              "options": {"num_ctx": NUM_CTX, "temperature": 0.2, "num_predict": max_tokens, "repeat_penalty": 1.08},
              "messages": [{"role": "system", "content": SISTEMA}, {"role": "user", "content": usuario}]}
+    if "qwen3" in modelo.lower() and "instruct" not in modelo.lower():
+        corpo["think"] = False  # variantes híbridas do Qwen3 raciocinam por padrão; aqui só importa a resposta
     inicio = time.time()
     partes: list[str] = []
     with httpx.stream("POST", f"{OLLAMA}/api/chat", json=corpo, timeout=httpx.Timeout(30, read=600)) as r:
