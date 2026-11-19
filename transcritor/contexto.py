@@ -14,12 +14,15 @@ import time
 from pathlib import Path
 from typing import Callable
 
+import logging
+
 import httpx
 
 from .config import RAIZ_PROJETO
 from .markdown import hms
 from .perfis import PERFIS
 
+log = logging.getLogger("transcritor")
 OLLAMA = os.environ.get("TRANSCRITOR_OLLAMA", "http://127.0.0.1:11435")
 LIBRARY_CUDA = os.environ.get("TRANSCRITOR_OLLAMA_LIB", "cuda_v12")
 PASTA_PROMPTS = RAIZ_PROJETO / "prompts"
@@ -97,7 +100,9 @@ def garantir_ollama() -> None:
     exe = shutil.which("ollama") or os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe")
     if not Path(exe).exists():
         raise RuntimeError("Ollama não está instalado (winget install Ollama.Ollama).")
-    env = {**os.environ, "OLLAMA_HOST": OLLAMA.split("//")[1], "OLLAMA_LLM_LIBRARY": LIBRARY_CUDA}
+    # Flash attention + cache KV em q8 reduzem a memória do contexto (mais camadas na GPU, mais velocidade).
+    env = {**os.environ, "OLLAMA_HOST": OLLAMA.split("//")[1], "OLLAMA_LLM_LIBRARY": LIBRARY_CUDA,
+           "OLLAMA_FLASH_ATTENTION": "1", "OLLAMA_KV_CACHE_TYPE": "q8_0"}
     _processo = subprocess.Popen([exe, "serve"], env=env, creationflags=0x08000000,  # sem janela
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(30):
@@ -123,10 +128,34 @@ def modelos_instalados() -> list[str]:
         return []
 
 
-def _chat(modelo: str, usuario: str, cancelar: Callable[[], None]) -> str:
-    corpo = {"model": modelo, "stream": True, "keep_alive": 0,
-             "options": {"num_ctx": NUM_CTX, "temperature": 0.2},
+def descarregar(modelo: str) -> None:
+    """Libera o modelo da VRAM (a próxima transcrição precisa dela)."""
+    try:
+        httpx.post(f"{OLLAMA}/api/generate", json={"model": modelo, "keep_alive": 0}, timeout=10)
+    except httpx.HTTPError:
+        pass
+
+
+def _chat(modelo: str, usuario: str, cancelar: Callable[[], None], max_tokens: int = 2048) -> str:
+    """Chama o modelo; repete uma vez se o Ollama falhar ao carregar (erro 500 intermitente observado)."""
+    try:
+        return _chat_uma_vez(modelo, usuario, cancelar, max_tokens)
+    except RuntimeError as exc:
+        if "Ollama respondeu 5" not in str(exc):
+            raise
+        log.warning("Ollama falhou ao carregar o modelo; tentando de novo")
+        descarregar(modelo)
+        time.sleep(3)
+        return _chat_uma_vez(modelo, usuario, cancelar, max_tokens)
+
+
+def _chat_uma_vez(modelo: str, usuario: str, cancelar: Callable[[], None], max_tokens: int = 2048) -> str:
+    # keep_alive: mantém o modelo carregado entre os blocos (descarregado ao fim por `descarregar`).
+    # num_predict limita respostas que entrariam em repetição.
+    corpo = {"model": modelo, "stream": True, "keep_alive": "10m",
+             "options": {"num_ctx": NUM_CTX, "temperature": 0.2, "num_predict": max_tokens, "repeat_penalty": 1.08},
              "messages": [{"role": "system", "content": SISTEMA}, {"role": "user", "content": usuario}]}
+    inicio = time.time()
     partes: list[str] = []
     with httpx.stream("POST", f"{OLLAMA}/api/chat", json=corpo, timeout=httpx.Timeout(30, read=600)) as r:
         if r.status_code == 404:
@@ -148,7 +177,10 @@ def _chat(modelo: str, usuario: str, cancelar: Callable[[], None]) -> str:
             partes.append(d.get("message", {}).get("content", ""))
     # Modelos pequenos costumam embrulhar a resposta em ```markdown … ```: remove as cercas.
     linhas = [l for l in "".join(partes).splitlines() if l.strip().lower() not in ("```", "```markdown", "```md")]
-    return "\n".join(linhas).strip()
+    saida = "\n".join(linhas).strip()
+    log.info("LLM: prompt %d palavras → resposta %d palavras em %.0fs", len(usuario.split()), len(saida.split()),
+             time.time() - inicio)  # só contagens, nunca o texto
+    return saida
 
 
 def _blocos(transcricao: str, limite: int = PALAVRAS_POR_BLOCO) -> list[str]:
@@ -169,6 +201,13 @@ def gerar(perfil: str, participantes: str, transcricao: str, modelo: str,
           progresso: Callable[[float], None], cancelar: Callable[[], None]) -> str:
     """Devolve o documento contextualizado (Markdown)."""
     garantir_ollama()
+    try:
+        return _gerar(perfil, participantes, transcricao, modelo, progresso, cancelar)
+    finally:
+        descarregar(modelo)
+
+
+def _gerar(perfil, participantes, transcricao, modelo, progresso, cancelar) -> str:
     prompt_modelo = ler_prompt(perfil)
     blocos = _blocos(transcricao)
     if len(blocos) == 1:
@@ -184,10 +223,10 @@ def gerar(perfil: str, participantes: str, transcricao: str, modelo: str,
         progresso(100 * (i - 1) / total)
         notas.append(_chat(modelo, (
             f"Você receberá UM TRECHO ({i}/{len(blocos)}) de uma transcrição longa. "
-            "Extraia notas objetivas e fiéis, mantendo os tempos [hh:mm:ss] e os nomes, "
-            "que servirão depois para cumprir a seguinte tarefa final:\n\n"
+            "Extraia notas objetivas e fiéis, em tópicos curtos (no máximo 250 palavras), mantendo os tempos "
+            "[hh:mm:ss] e os nomes. Elas servirão depois para cumprir a seguinte tarefa final:\n\n"
             f"=== TAREFA FINAL ===\n{tarefa}\n=== FIM DA TAREFA ===\n\n"
-            f"Participantes:\n{participantes}\n\nTrecho:\n{b}"), cancelar))
+            f"Participantes:\n{participantes}\n\nTrecho:\n{b}"), cancelar, max_tokens=700))
 
     # Reduz hierarquicamente se as notas ainda não couberem em um contexto.
     while len("\n".join(notas).split()) > PALAVRAS_POR_BLOCO + 500 and len(notas) > 1:
@@ -195,7 +234,7 @@ def gerar(perfil: str, participantes: str, transcricao: str, modelo: str,
         if len(grupos) >= len(notas):
             break
         notas = [_chat(modelo, "Condense estas notas sem perder decisões, prazos, nomes e tempos:\n\n" + g,
-                       cancelar) for g in grupos]
+                       cancelar, max_tokens=700) for g in grupos]
     progresso(100 * len(blocos) / total)
     saida = _chat(modelo, preencher(
         prompt_modelo, participantes,

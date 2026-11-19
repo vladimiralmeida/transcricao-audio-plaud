@@ -40,7 +40,18 @@ modelo de cada etapa é descarregado antes da seguinte (`del` + `torch.cuda.empt
 Os prompts ficam em `prompts/<perfil>.md` com os marcadores `{{participantes}}` e `{{transcricao}}`.
 Até ~2000 palavras o texto vai inteiro ao modelo. Acima disso: cada bloco gera notas fiéis (cientes da tarefa
 final), as notas são condensadas se ainda forem grandes e uma última chamada produz o documento (*map-reduce*).
-O contexto é de 8192 tokens, o que cabe com folga na VRAM junto de um modelo de 7B quantizado.
+O contexto é de 8192 tokens. Notas intermediárias são limitadas (≈250 palavras, `num_predict` 700) e o modelo fica
+carregado entre os blocos (`keep_alive` 10 min), sendo descarregado da VRAM ao final.
+
+**Desempenho medido** (RTX 4050 6 GB, `qwen2.5:7b`, áudio real de 49 min ≈ 8 mil palavras): 6 chamadas de 18–52 s,
+**171 s no total**. O 7B não cabe 100 % na VRAM (≈ 81 % GPU / 19 % CPU); *flash attention* e cache KV em `q8_0`
+(`OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`, definidos pelo painel) deixaram a geração em ≈ 21 tok/s.
+Antes dessa otimização (modelo recarregado a cada bloco, notas longas) o mesmo trabalho passava de 10 minutos por
+bloco. `testes/bench_llm.py` mede velocidade e divisão CPU/GPU de qualquer modelo.
+O Ollama às vezes devolve erro 500 ao carregar o modelo; o painel tenta de novo uma vez automaticamente.
+
+**Limite de qualidade:** o 7B local pode omitir seções pedidas no prompt (num teste real faltaram *Dúvidas em aberto* e
+*Referências*). Confira o documento contra a transcrição e ajuste o prompt em Configurações, ou troque o modelo.
 
 ### Ollama e CUDA
 
