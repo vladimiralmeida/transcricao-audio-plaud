@@ -67,6 +67,14 @@ Regras, não aprendizado: nomes informados nos falantes (nome completo e cada pa
 digitados e padrões (e-mail, CPF, CNPJ, telefone, número CNJ) viram códigos como `[ENTREVISTADO 1]`. Os rótulos
 dos falantes viram o mesmo código. A tabela de correspondência é gravada só no banco local.
 
+## Detecção de pastas e início manual
+
+O monitor (`watchdog`) espera o tamanho do arquivo ficar estável e então chama o motor, que cria um trabalho com status
+`aguardando`: ele **não** entra na fila nem aparece no histórico. O estado do trabalho segue
+`aguardando → fila → processando → concluido | erro | cancelado`. Ao apertar ▶, `POST /api/jobs/{id}/iniciar` grava
+número de falantes e participantes e enfileira. Com `auto_iniciar` ligado, o trabalho nasce já em `fila`. Ao iniciar o
+painel, a pasta é varrida e os arquivos ainda presentes voltam à lista de espera (sem duplicar).
+
 ## Dados (`db.py`)
 
 SQLite em `dados/app.db`: tabela `jobs` (estado, turnos e falantes em JSON, documento, anonimização), `busca`
@@ -78,10 +86,12 @@ SQLite em `dados/app.db`: tabela `jobs` (estado, turnos e falantes em JSON, docu
 | Método e rota | Função |
 |---|---|
 | `GET /api/estado` | perfis, configuração, Ollama, GPU, cofres do Obsidian |
-| `PUT /api/config` | `ollama_modelo`, `obsidian_cofre`, `obsidian_subpasta`, `monitor_ativo` |
+| `PUT /api/config` | `ollama_modelo`, `obsidian_cofre`, `obsidian_subpasta`, `monitor_ativo`, `auto_iniciar` |
 | `GET /api/stream` | SSE a 1 Hz: GPU, trabalhos ativos e contador de versão |
 | `GET /api/gpu/historico`, `GET /api/progresso` | histórico para os gráficos |
 | `POST /api/jobs` | upload (`arquivo`, `perfil`, `num_falantes`, `participantes`) |
+| `GET /api/aguardando` | arquivos detectados nas pastas que esperam o play (some da lista se o arquivo for removido) |
+| `POST /api/jobs/{id}/iniciar` | play: aplica `num_falantes`/`participantes` e põe o arquivo na fila (409 se já iniciado) |
 | `POST /api/escolher-arquivo` | abre o seletor nativo do Windows em `entrada\<perfil>`; devolve um token (o caminho fica no servidor) |
 | `POST /api/jobs/escolhido` | cria o trabalho a partir do token (dentro de `entrada/`: usa no lugar; fora: copia) |
 | `GET /api/jobs?q=&perfil=` | lista e busca |

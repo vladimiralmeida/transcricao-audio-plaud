@@ -111,8 +111,9 @@ def obter(job_id: int, completo: bool = True) -> dict | None:
 
 
 def listar(q: str = "", perfil: str = "", limite: int = 200) -> list[dict]:
+    """Histórico: não inclui arquivos ainda 'aguardando' o início manual (veja `aguardando`)."""
     sql, args = "SELECT jobs.* FROM jobs", []
-    cond = []
+    cond = ["jobs.status != 'aguardando'"]
     if q.strip():
         sql += " JOIN busca ON busca.job_id = jobs.id"
         cond.append("busca MATCH ?")
@@ -125,6 +126,24 @@ def listar(q: str = "", perfil: str = "", limite: int = 200) -> list[dict]:
     sql += " ORDER BY jobs.id DESC LIMIT ?"
     with conexao() as c:
         return [_linha(r, completo=False) for r in c.execute(sql, [*args, limite])]
+
+
+def aguardando() -> list[dict]:
+    with conexao() as c:
+        return [_linha(r, completo=False) for r in c.execute(
+            "SELECT * FROM jobs WHERE status='aguardando' ORDER BY id")]
+
+
+def contar_aguardando() -> int:
+    with conexao() as c:
+        return c.execute("SELECT COUNT(*) FROM jobs WHERE status='aguardando'").fetchone()[0]
+
+
+def audio_em_uso(caminho: str) -> bool:
+    """True se já existe trabalho pendente ou em andamento para este arquivo."""
+    with conexao() as c:
+        return c.execute("SELECT 1 FROM jobs WHERE audio=? AND status IN ('aguardando','fila','processando')",
+                         (caminho,)).fetchone() is not None
 
 
 def _consulta_fts(q: str) -> str:

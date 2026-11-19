@@ -17,7 +17,7 @@ from .pipeline import Cancelado, processar
 log = logging.getLogger("transcritor")
 
 PADRAO = {"ollama_modelo": "qwen3:4b-instruct-2507-q4_K_M", "obsidian_cofre": "", "obsidian_subpasta": "Transcrições",
-          "monitor_ativo": True}
+          "monitor_ativo": True, "auto_iniciar": False}
 
 
 class Motor:
@@ -76,18 +76,32 @@ class Motor:
             self.monitor = None
 
     def _arquivo_detectado(self, caminho: Path, perfil: str) -> None:
-        for j in db.listar(limite=1000):
-            if j["audio"] == str(caminho) and j["status"] in ("fila", "processando"):
-                return
-        self.novo_job(caminho.name, perfil, caminho, origem="pasta")
+        """Arquivo novo em entrada/<perfil>: por padrão fica AGUARDANDO você configurar os falantes e
+        apertar play. Com `auto_iniciar` ligado nas configurações, começa sozinho."""
+        if db.audio_em_uso(str(caminho)):
+            return
+        self.novo_job(caminho.name, perfil, caminho, origem="pasta", iniciar=bool(self.config("auto_iniciar")))
 
     # ------------------------------------------------------------------------ interface
     def novo_job(self, nome: str, perfil: str, audio: Path, origem: str = "upload",
-                 num_falantes: int | None = None, participantes: list | None = None) -> int:
+                 num_falantes: int | None = None, participantes: list | None = None,
+                 iniciar: bool = True) -> int:
         jid = db.criar_job(nome=nome, perfil=perfil, origem=origem, audio=str(audio),
-                           num_falantes=num_falantes, participantes=participantes or [])
-        self._enfileirar("t", jid)
+                           num_falantes=num_falantes, participantes=participantes or [],
+                           status="fila" if iniciar else "aguardando")
+        if iniciar:
+            self._enfileirar("t", jid)
+        else:
+            self._bump()
         return jid
+
+    def iniciar_aguardando(self, jid: int, num_falantes: int | None, participantes: list) -> None:
+        """Botão play: aplica falantes/nomes informados e põe o arquivo na fila."""
+        j = db.obter(jid, completo=False)
+        if not j or j["status"] != "aguardando":
+            raise ValueError("Este arquivo não está aguardando.")
+        db.atualizar(jid, num_falantes=num_falantes, participantes=participantes, status="fila")
+        self._enfileirar("t", jid)
 
     def reprocessar(self, jid: int) -> None:
         db.atualizar(jid, status="fila", etapa="", progresso=0, erro=None)

@@ -66,6 +66,7 @@ const I = {
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
   down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>',
   spark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>',
   folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
   doc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>',
@@ -78,7 +79,7 @@ const I = {
 const ORDEM = ['orientacao', 'entrevista', 'reuniao', 'aula'];
 const CORES = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#8b5cf6', '#ef4444', '#84cc16'];
 const corDe = (rotulos, r) => CORES[Math.max(0, rotulos.indexOf(r)) % CORES.length];
-const PILULA = { fila: ['warn', 'Na fila'], processando: ['run', 'Processando'], concluido: ['ok', 'Concluído'], erro: ['err', 'Erro'], cancelado: ['', 'Cancelado'] };
+const PILULA = { aguardando: ['warn', 'Aguardando'], fila: ['warn', 'Na fila'], processando: ['run', 'Processando'], concluido: ['ok', 'Concluído'], erro: ['err', 'Erro'], cancelado: ['', 'Cancelado'] };
 const pilula = s => { const [c, t] = PILULA[s] || ['', s]; return `<span class="pill ${c}"><span class="dot"></span>${t}</span>`; };
 
 // ------------------------------------------------------------------------ estado
@@ -87,6 +88,7 @@ const S = {
   rota: null, job: null, dirty: false, aba: 'transcricao',
   home: { perfil: 'orientacao', arquivo: null, n: 0, pessoas: [] },
   hist: { q: '', perfil: '' },
+  aguard: [], pend: {},  // arquivos detectados nas pastas + rascunho (falantes) de cada um
 };
 const ativoAgora = () => S.ativos.find(a => a.estado === 'processando') || null;
 
@@ -217,7 +219,7 @@ function conectar() {
       const h = S.prog[a.id] = S.prog[a.id] || [];
       if (!h.length || h[h.length - 1][1] !== a.progresso) h.push([d.t, a.progresso]);
     }
-    const n = d.ativos.length;
+    const n = d.ativos.length + (d.aguardando || 0);
     $('#navcount').textContent = n; $('#navcount').classList.toggle('hidden', !n);
     if (d.versao !== S.versao) { S.versao = d.versao; aoMudar(); }
     atualizarMonitor(); atualizarJobAoVivo();
@@ -225,7 +227,7 @@ function conectar() {
   es.onerror = () => { /* o navegador reconecta sozinho */ };
 }
 function aoMudar() {
-  if (S.rota === 'home') carregarRecentes();
+  if (S.rota === 'home') { carregarRecentes(); carregarAguardando(); }
   else if (S.rota === 'historico') carregarHistorico();
   else if (S.rota === 'job' && S.job && !S.dirty) renderJob(S.job.id, true);
 }
@@ -250,6 +252,7 @@ function renderHome() {
   const e = S.estado, h = S.home;
   view.innerHTML = `
   <div class="page-head"><div><h1>Nova transcrição</h1><p>Transcreva localmente, identifique quem falou e gere o documento do perfil escolhido.</p></div></div>
+  <section id="aguardando" class="hidden" style="margin-bottom:22px"></section>
   <div class="grid-home">
     <section class="card" id="novo">
       <div class="step"><i>1</i><h3>Perfil da gravação</h3></div>
@@ -262,7 +265,7 @@ function renderHome() {
         <input type="file" id="arq" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.opus,.aac,.mp4,.webm" class="hidden">
       </div>
       <div class="muted small" style="margin-top:10px">Ou solte o arquivo na pasta monitorada
-        <span class="kbd">entrada\\${h.perfil}</span> e ele será processado sozinho.
+        <span class="kbd">entrada\\${h.perfil}</span>: ele aparece em “Aguardando você” e só começa quando você apertar ▶.
         <button class="btn sm ghost" id="abrirpasta">${I.folder} Abrir pasta</button></div>
       <div class="step"><i>3</i><h3>Falantes</h3></div>
       <div class="row"><span class="muted small">Quantas pessoas falam?</span>
@@ -305,7 +308,65 @@ function renderHome() {
   $$('#people input').forEach(i => i.oninput = () => { (h.pessoas[+i.dataset.p] ||= {})[i.dataset.k] = i.value; });
   $('#abrirpasta').onclick = () => api('/api/abrir-pasta', { json: { qual: `entrada/${h.perfil}` } }).catch(falha);
   $('#enviar').onclick = enviar;
-  atualizarMonitor(); carregarRecentes();
+  atualizarMonitor(); carregarRecentes(); carregarAguardando();
+}
+
+// ---- arquivos detectados nas pastas: aguardam falantes + play manual
+async function carregarAguardando() {
+  if (!$('#aguardando')) return;
+  try { S.aguard = await api('/api/aguardando'); } catch (e) { return falha(e); }
+  const ids = new Set(S.aguard.map(j => j.id));
+  Object.keys(S.pend).forEach(k => { if (!ids.has(+k)) delete S.pend[k]; });
+  desenharAguardando();
+}
+
+function rascunho(j) { return S.pend[j.id] ||= { n: j.num_falantes || j.dica || 0, pessoas: (j.participantes || []).slice() }; }
+
+function pendHTML(j) {
+  const d = rascunho(j), p = S.estado.perfis[j.perfil];
+  return `<div class="pend" data-id="${j.id}">
+    <div class="pend-top">
+      <button class="play" data-play title="Iniciar esta transcrição" aria-label="Iniciar transcrição de ${esc(j.nome)}">${I.play}</button>
+      <div style="min-width:0"><div class="ellipsis"><b>${esc(j.nome)}</b></div>
+        <div class="muted small">${esc(p?.nome || j.perfil)} · ${mb(j.tamanho)}${j.dica ? ` · nome indica ${j.dica} falantes` : ''}</div></div>
+      <button class="btn sm ghost" data-descartar>Descartar</button>
+    </div>
+    <div class="pend-body">
+      <div class="row"><span class="muted small">Quantas pessoas falam?</span>
+        <div class="stepper"><button type="button" data-pn="-1" aria-label="Menos">−</button><span>${d.n ? d.n : 'Automático'}</span><button type="button" data-pn="1" aria-label="Mais">+</button></div></div>
+      ${d.n ? `<div class="people">${Array.from({ length: d.n }, (_, i) => { const q = d.pessoas[i] || {};
+        return `<div class="person"><span class="n">${i + 1}</span><input type="text" data-pp="${i}" data-k="nome" placeholder="Nome (opcional)" value="${esc(q.nome || '')}">
+        <input type="text" data-pp="${i}" data-k="papel" list="papeis-${j.id}" placeholder="Papel" value="${esc(q.papel || '')}"></div>`; }).join('')}</div>
+        <datalist id="papeis-${j.id}">${(p?.papeis || []).map(x => `<option value="${esc(x)}">`).join('')}</datalist>` : ''}
+    </div></div>`;
+}
+
+function desenharAguardando() {
+  const el = $('#aguardando'); if (!el) return;
+  const l = S.aguard;
+  el.classList.toggle('hidden', !l.length);
+  if (!l.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="card pend-card"><div class="card-head"><div><h2>Aguardando você <span class="pill warn">${l.length}</span></h2>
+      <div class="muted small">Arquivos detectados nas pastas de entrada. Informe os falantes de cada um e aperte ▶ para começar.</div></div>
+      ${l.length > 1 ? `<button class="btn sm" id="iniciartodos">${I.play} Iniciar todos</button>` : ''}</div>
+    <div class="pendlist">${l.map(pendHTML).join('')}</div></div>`;
+  const dados = j => { const d = rascunho(j); return { num_falantes: d.n ? String(d.n) : 'auto', participantes: d.n ? Array.from({ length: d.n }, (_, i) => d.pessoas[i] || {}) : [] }; };
+  const iniciar = async j => { await api(`/api/jobs/${j.id}/iniciar`, { json: dados(j) }); delete S.pend[j.id]; };
+  $$('.pend', el).forEach(card => {
+    const j = S.aguard.find(x => x.id === +card.dataset.id), d = rascunho(j);
+    $$('[data-pn]', card).forEach(b => b.onclick = () => { d.n = Math.max(0, Math.min(8, d.n + +b.dataset.pn)); desenharAguardando(); });
+    $$('[data-pp]', card).forEach(i => i.oninput = () => { (d.pessoas[+i.dataset.pp] ||= {})[i.dataset.k] = i.value; });
+    $('[data-play]', card).onclick = async () => {
+      try { await iniciar(j); toast('Transcrição iniciada.'); carregarAguardando(); } catch (e) { falha(e); }
+    };
+    $('[data-descartar]', card).onclick = async () => {
+      if (!confirm('Tirar este arquivo da lista? Ele continua na pasta (e volta à lista se o painel for reiniciado).')) return;
+      try { await api(`/api/jobs/${j.id}`, { method: 'DELETE' }); delete S.pend[j.id]; carregarAguardando(); } catch (e) { falha(e); }
+    };
+  });
+  $('#iniciartodos')?.addEventListener('click', async () => {
+    try { for (const j of [...S.aguard]) await iniciar(j); toast('Todas as transcrições entraram na fila.'); carregarAguardando(); } catch (e) { falha(e); }
+  });
 }
 
 function enviar() {
@@ -550,7 +611,9 @@ async function renderConfig() {
   view.innerHTML = `<div class="page-head"><div><h1>Configurações</h1><p>Tudo é salvo localmente.</p></div></div>
   <div class="card"><div class="card-head"><div><h2>Pastas monitoradas</h2><div class="muted small">Arquivos soltos nestas pastas viram trabalhos automaticamente; a subpasta define o perfil.</div></div>
     <label class="row small" style="gap:8px"><input type="checkbox" id="mon" ${c.monitor_ativo ? 'checked' : ''}> Detecção automática ligada</label></div>
-    <div class="row">${ORDEM.map(k => `<button class="btn sm" data-pasta="entrada/${k}">${I.folder} entrada\\${k}</button>`).join('')}<button class="btn sm" data-pasta="saida">${I.folder} saida</button><button class="btn sm" data-pasta="processados">${I.folder} processados</button></div></div>
+    <div class="row">${ORDEM.map(k => `<button class="btn sm" data-pasta="entrada/${k}">${I.folder} entrada\\${k}</button>`).join('')}<button class="btn sm" data-pasta="saida">${I.folder} saida</button><button class="btn sm" data-pasta="processados">${I.folder} processados</button></div>
+    <label class="row small" style="gap:8px;margin-top:14px"><input type="checkbox" id="auto" ${c.auto_iniciar ? 'checked' : ''}> Iniciar a transcrição automaticamente ao detectar um arquivo
+      <span class="muted">(desligado: o arquivo espera você informar os falantes e apertar ▶)</span></label></div>
   <div class="card"><div class="card-head"><div><h2>Modelo de linguagem local (Ollama)</h2><div class="muted small">Usado para gerar atas e notas. Roda na sua GPU e libera a memória ao terminar.</div></div>
     <span class="pill ${oll.ativo ? 'ok' : 'warn'}"><span class="dot"></span>${oll.ativo ? 'Em execução' : 'Parado'}</span></div>
     <div class="row"><select id="ollm" style="max-width:340px">${[...new Set([c.ollama_modelo, ...oll.modelos])].map(m => `<option ${m === c.ollama_modelo ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>
@@ -564,6 +627,7 @@ async function renderConfig() {
   <div class="card"><h2>Sobre</h2><p class="muted" style="margin:8px 0 0">Transcrição de áudio do Plaud Note Pro · por Vladimir Almeida<br>Transcrição: <b>${esc(e.modelo_whisper)}</b> · Falantes: pyannote · GPU: ${esc(e.gpu_nome)}<br>Nenhum áudio ou texto sai deste computador.</p></div>`;
   $$('[data-pasta]').forEach(b => b.onclick = () => api('/api/abrir-pasta', { json: { qual: b.dataset.pasta } }).catch(falha));
   $('#mon').onchange = ev => api('/api/config', { method: 'PUT', json: { monitor_ativo: ev.target.checked } }).then(r => { S.estado = r; toast(ev.target.checked ? 'Detecção ligada.' : 'Detecção desligada.'); }).catch(falha);
+  $('#auto').onchange = ev => api('/api/config', { method: 'PUT', json: { auto_iniciar: ev.target.checked } }).then(r => { S.estado = r; toast(ev.target.checked ? 'Início automático ligado.' : 'Os arquivos detectados vão aguardar o seu play.'); }).catch(falha);
   $('#ollm').onchange = ev => api('/api/config', { method: 'PUT', json: { ollama_modelo: ev.target.value } }).then(r => { S.estado = r; toast('Modelo salvo.'); }).catch(falha);
   $('#cofsel').onchange = ev => { if (ev.target.value) $('#cof').value = ev.target.value; };
   $('#salvarobs').onclick = () => api('/api/config', { method: 'PUT', json: { obsidian_cofre: $('#cof').value.trim(), obsidian_subpasta: $('#sub').value.trim() || 'Transcrições' } }).then(r => { S.estado = r; toast('Obsidian configurado.'); }).catch(falha);

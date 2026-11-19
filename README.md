@@ -13,7 +13,7 @@ Nada sai do seu computador: transcrição, separação de falantes e o modelo de
 | | |
 |---|---|
 | **Quatro perfis** | Orientação, Entrevista, Profissional (reuniões) e Aula. Cada um tem seus papéis de falantes e seu prompt. |
-| **Duas formas de entrada** | Enviar o áudio pelo painel (arrastar e soltar) **ou** soltar o arquivo na pasta `entrada\<perfil>`: a detecção é automática. |
+| **Duas formas de entrada** | Enviar o áudio pelo painel (arrastar e soltar) **ou** soltar o arquivo na pasta `entrada\<perfil>`: o painel o detecta e o deixa **aguardando você**, com número de falantes, nomes, papéis e um botão ▶ para começar quando quiser (nada inicia sozinho). |
 | **Falantes** | Escolha o número de pessoas (ou automático), informe nome e papel e depois confirme quem é cada voz ouvindo exemplos. |
 | **Transcrição** | Whisper `large-v3-turbo` na GPU, português, com tempos por fala. |
 | **Documento contextualizado** | Um LLM local (Ollama) transforma o texto bruto na ata/resumo/notas do perfil. Prompts editáveis. |
@@ -66,7 +66,10 @@ Dê duplo clique em **`Iniciar painel.bat`** (ou rode `.venv\Scripts\painel`). O
 3. Abra a transcrição, confirme os falantes na aba **Falantes**, corrija o que precisar e gere o documento.
 4. Exporte para Word, Markdown ou Obsidian.
 
-Dica: terminar o nome do arquivo com `_2p`, `_3p`… informa o número de falantes quando você solta o arquivo na pasta.
+**Arquivos soltos na pasta:** aparecem no cartão **Aguardando você**, no topo da tela inicial. Cada um tem seus próprios
+campos de falantes (nome e papel) e seu botão ▶; há também **Iniciar todos** e **Descartar** (tira da lista sem apagar o
+arquivo). Terminar o nome do arquivo com `_2p`, `_3p`… já preenche o número de falantes. Se preferir o comportamento
+antigo, ligue **Iniciar a transcrição automaticamente** em Configurações.
 
 ### Linha de comando (opcional)
 

@@ -23,6 +23,7 @@ from . import contexto, db, exportar
 from .config import Config
 from .engine import PADRAO, Motor
 from .perfis import PERFIS
+from .pipeline import dica_falantes
 
 WEB = Path(__file__).parent / "web"
 EXTENSOES_AUDIO = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".aac", ".wma", ".mp4", ".webm"}
@@ -55,6 +56,11 @@ class CorpoPrompt(BaseModel):
 
 class CorpoPasta(BaseModel):
     qual: str
+
+
+class CorpoIniciar(BaseModel):
+    num_falantes: str = "auto"
+    participantes: list[dict] = []
 
 
 class CorpoEscolher(BaseModel):
@@ -163,7 +169,8 @@ def criar_app(cfg: Config) -> FastAPI:
         async def gerar():
             while not await request.is_disconnected():
                 dados = {"gpu": motor.gpu.ultima, "ativos": motor.estado_ativos(),
-                         "versao": motor.versao, "fila": motor.fila.qsize(), "t": time.time()}
+                         "versao": motor.versao, "fila": motor.fila.qsize(), "t": time.time(),
+                         "aguardando": db.contar_aguardando()}
                 yield f"data: {json.dumps(dados)}\n\n"
                 await asyncio.sleep(1)
 
@@ -241,6 +248,28 @@ def criar_app(cfg: Config) -> FastAPI:
             shutil.copyfile(p, audio)
             origem = "upload"
         return {"id": motor.novo_job(p.name, corpo.perfil, audio, origem, n, lista)}
+
+    @app.get("/api/aguardando")
+    def listar_aguardando():
+        """Arquivos detectados nas pastas de entrada que esperam você configurar e apertar play."""
+        saida = []
+        for j in db.aguardando():
+            p = Path(j["audio"] or "")
+            if not p.is_file():  # o arquivo foi removido da pasta: some da lista
+                db.remover(j["id"])
+                motor._bump()
+                continue
+            saida.append({**j, "tamanho": p.stat().st_size, "dica": dica_falantes(j["nome"])})
+        return saida
+
+    @app.post("/api/jobs/{jid}/iniciar")
+    def iniciar_manual(jid: int, corpo: CorpoIniciar):
+        lista, n = participantes_e_n(corpo.num_falantes, corpo.participantes)
+        try:
+            motor.iniciar_aguardando(jid, n, lista)
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        return {"ok": True}
 
     @app.post("/api/jobs")
     async def criar_job(arquivo: UploadFile = File(...), perfil: str = Form(...),
