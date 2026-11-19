@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transcritor"
+version = "0.1.0"
+description = "Transcrição local (Whisper + pyannote) de gravações do Plaud para Markdown"
+requires-python = ">=3.11,<3.13"
+# Dependências pesadas (torch CUDA etc.) são instaladas conforme o README;
+# veja requirements.lock.txt para as versões testadas.
+dependencies = []
+
+[project.scripts]
+transcrever = "transcritor.cli:transcrever"
+monitorar = "transcritor.cli:monitorar"
+painel = "transcritor.cli:painel"
+renomear-falantes = "transcritor.cli:renomear_falantes"
+
+[tool.setuptools]
+packages = ["transcritor"]
+
+[tool.setuptools.package-data]
+transcritor = ["web/*"]

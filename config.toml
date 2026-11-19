@@ -1,0 +1,21 @@
+# Configuração do transcritor local.
+# Caminhos relativos são resolvidos a partir da pasta deste arquivo.
+
+[geral]
+# base = "D:/gravacoes"      # descomente para mudar a pasta base (entrada/, saida/ ...)
+perfis = ["reuniao", "orientacao", "aula", "entrevista"]
+
+[modelo]
+nome = "large-v3-turbo"
+compute_type = "float16"
+idioma = "pt"
+# Usado automaticamente se faltar memória da GPU (CUDA OOM):
+fallback_nome = "large-v3-turbo"
+fallback_compute_type = "int8_float16"
+# Para máxima qualidade (mais lento, cabe em 6 GB só com int8_float16):
+# nome = "large-v3"
+# compute_type = "int8_float16"
+
+[monitor]
+extensoes = [".mp3", ".wav", ".m4a"]
+segundos_estavel = 5     # tamanho do arquivo precisa ficar igual por este tempo
