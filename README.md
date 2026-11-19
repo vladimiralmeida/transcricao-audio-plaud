@@ -117,6 +117,13 @@ texto para qualquer serviço externo.
 .venv\Scripts\python testes\teste_api.py <audio_curto.wav> <pasta_vazia>   # integração, com o painel rodando
 ```
 
+## Licença
+
+O código deste repositório é distribuído sob a [licença MIT](LICENSE). Ela **não** cobre os componentes de terceiros,
+que têm licenças e termos próprios: os modelos Whisper, o modelo de falantes do pyannote (exige aceitar termos no
+Hugging Face), o Ollama e o modelo de linguagem escolhido (como o Qwen3), PyTorch e demais bibliotecas. Confira cada um
+antes de redistribuir. “Plaud” e “Plaud Note Pro” são marcas de seus titulares; este projeto não é afiliado a eles.
+
 ## Documentação
 
 [Instalação](docs/instalacao.md) · [Arquitetura](docs/arquitetura.md) · [Privacidade](docs/privacidade.md) ·
