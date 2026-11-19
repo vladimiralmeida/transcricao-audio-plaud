@@ -82,6 +82,8 @@ SQLite em `dados/app.db`: tabela `jobs` (estado, turnos e falantes em JSON, docu
 | `GET /api/stream` | SSE a 1 Hz: GPU, trabalhos ativos e contador de versão |
 | `GET /api/gpu/historico`, `GET /api/progresso` | histórico para os gráficos |
 | `POST /api/jobs` | upload (`arquivo`, `perfil`, `num_falantes`, `participantes`) |
+| `POST /api/escolher-arquivo` | abre o seletor nativo do Windows em `entrada\<perfil>`; devolve um token (o caminho fica no servidor) |
+| `POST /api/jobs/escolhido` | cria o trabalho a partir do token (dentro de `entrada/`: usa no lugar; fora: copia) |
 | `GET /api/jobs?q=&perfil=` | lista e busca |
 | `GET/DELETE /api/jobs/{id}` | detalhe / remover do histórico (não apaga arquivos) |
 | `PUT /api/jobs/{id}/falantes`, `/turnos`, `/contexto` | edições |

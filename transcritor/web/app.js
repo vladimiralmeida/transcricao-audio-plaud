@@ -257,7 +257,7 @@ function renderHome() {
         <div class="ico">${I[k]}</div><b>${esc(e.perfis[k].nome)}</b><span>${esc(e.perfis[k].descricao)}</span></button>`).join('')}</div>
       <div class="step"><i>2</i><h3>Arquivo de áudio</h3></div>
       <div class="drop" id="drop" tabindex="0">
-        ${h.arquivo ? `<div class="file">${I.file}<span>${esc(h.arquivo.name)}</span><span class="muted small">${mb(h.arquivo.size)}</span></div><div class="muted small" style="margin-top:6px">Clique para trocar</div>`
+        ${h.arquivo ? `<div class="file">${I.file}<span>${esc(h.arquivo.name)}</span><span class="muted small">${mb(h.arquivo.size)}</span></div><div class="muted small" style="margin-top:6px">${h.escolhido?.na_entrada ? 'Está na pasta de entrada · ' : h.escolhido ? 'Será copiado; o original não é alterado · ' : ''}Clique para trocar</div>`
           : `${I.upload}<div style="margin-top:6px"><b>Arraste o áudio aqui</b> ou clique para escolher</div><div class="muted small">MP3, WAV, M4A e outros formatos do Plaud</div>`}
         <input type="file" id="arq" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.opus,.aac,.mp4,.webm" class="hidden">
       </div>
@@ -282,13 +282,25 @@ function renderHome() {
 
   $$('.perfil').forEach(b => b.onclick = () => { h.perfil = b.dataset.perfil; renderHome(); });
   const drop = $('#drop'), arq = $('#arq');
-  drop.onclick = () => arq.click();
-  drop.onkeydown = ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); arq.click(); } };
+  // Clique: seletor nativo do Windows, já na pasta entrada\<perfil>. Se indisponível, usa o do navegador.
+  const escolher = async () => {
+    if (drop.dataset.aberto) return;
+    drop.dataset.aberto = '1';
+    try {
+      const r = await api('/api/escolher-arquivo', { json: { perfil: h.perfil } });
+      if (r.cancelado) return;
+      h.arquivo = { name: r.nome, size: r.tamanho }; h.escolhido = r; renderHome();
+    } catch (e) {
+      if (/indispon/i.test(e.message)) arq.click(); else falha(e);
+    } finally { delete drop.dataset.aberto; }
+  };
+  drop.onclick = escolher;
+  drop.onkeydown = ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); escolher(); } };
   arq.onclick = ev => ev.stopPropagation();
-  arq.onchange = () => { if (arq.files[0]) { h.arquivo = arq.files[0]; renderHome(); } };
+  arq.onchange = () => { if (arq.files[0]) { h.arquivo = arq.files[0]; h.escolhido = null; renderHome(); } };
   ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, ev => { ev.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
-  drop.addEventListener('drop', ev => { const f = ev.dataTransfer.files[0]; if (f) { h.arquivo = f; renderHome(); } });
+  drop.addEventListener('drop', ev => { const f = ev.dataTransfer.files[0]; if (f) { h.arquivo = f; h.escolhido = null; renderHome(); } });
   $$('.stepper button').forEach(b => b.onclick = () => { h.n = Math.max(0, Math.min(8, h.n + +b.dataset.n)); renderHome(); });
   $$('#people input').forEach(i => i.oninput = () => { (h.pessoas[+i.dataset.p] ||= {})[i.dataset.k] = i.value; });
   $('#abrirpasta').onclick = () => api('/api/abrir-pasta', { json: { qual: `entrada/${h.perfil}` } }).catch(falha);
@@ -297,7 +309,17 @@ function renderHome() {
 }
 
 function enviar() {
-  const h = S.home, fd = new FormData();
+  const h = S.home;
+  if (h.escolhido) {  // arquivo escolhido no seletor nativo: o servidor já sabe qual é
+    $('#enviar').disabled = true;
+    api('/api/jobs/escolhido', { json: {
+      token: h.escolhido.token, perfil: h.perfil, num_falantes: h.n ? String(h.n) : 'auto',
+      participantes: h.n ? Array.from({ length: h.n }, (_, i) => h.pessoas[i] || {}) : [] } })
+      .then(() => { toast('Transcrição iniciada.'); S.home = { perfil: h.perfil, arquivo: null, escolhido: null, n: 0, pessoas: [] }; S.prog = {}; renderHome(); })
+      .catch(e => { falha(e); h.arquivo = null; h.escolhido = null; renderHome(); });
+    return;
+  }
+  const fd = new FormData();
   fd.append('arquivo', h.arquivo); fd.append('perfil', h.perfil);
   fd.append('num_falantes', h.n ? String(h.n) : 'auto');
   fd.append('participantes', JSON.stringify(h.n ? Array.from({ length: h.n }, (_, i) => h.pessoas[i] || {}) : []));

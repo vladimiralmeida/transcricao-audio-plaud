@@ -5,8 +5,11 @@ import asyncio
 import json
 import mimetypes
 import os
-import re
+import shutil
+import subprocess
+import sys
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote, urlparse
@@ -54,8 +57,31 @@ class CorpoPasta(BaseModel):
     qual: str
 
 
+class CorpoEscolher(BaseModel):
+    perfil: str
+
+
+class CorpoEscolhido(BaseModel):
+    token: str
+    perfil: str
+    num_falantes: str = "auto"
+    participantes: list[dict] = []
+
+
+# Executado em um processo à parte (o Tk precisa do seu próprio laço de eventos).
+SCRIPT_SELETOR = """
+import sys, tkinter as tk
+from tkinter import filedialog
+r = tk.Tk(); r.withdraw(); r.attributes('-topmost', True); r.update()
+p = filedialog.askopenfilename(parent=r, initialdir=sys.argv[1], title='Escolha o áudio para transcrever',
+    filetypes=[('Áudio', '*.mp3 *.wav *.m4a *.flac *.ogg *.opus *.aac *.wma *.mp4 *.webm'), ('Todos os arquivos', '*.*')])
+print(p)
+"""
+
+
 def criar_app(cfg: Config) -> FastAPI:
     motor = Motor(cfg)
+    escolhas: dict[str, Path] = {}  # token -> arquivo escolhido no seletor nativo
 
     @asynccontextmanager
     async def ciclo(app: FastAPI):
@@ -154,6 +180,68 @@ def criar_app(cfg: Config) -> FastAPI:
         return {"ok": True}
 
     # ------------------------------------------------------------------------- jobs
+    def participantes_e_n(num_falantes: str, participantes) -> tuple[list[dict], int | None]:
+        try:
+            lista = [{"nome": str(p.get("nome", ""))[:120], "papel": str(p.get("papel", ""))[:60]}
+                     for p in (json.loads(participantes) if isinstance(participantes, str) else participantes)][:12]
+        except (ValueError, AttributeError):
+            raise HTTPException(400, "Participantes inválidos.")
+        n = int(num_falantes) if num_falantes.isdigit() and 1 <= int(num_falantes) <= 12 else None
+        if n is None and len(lista) > 1:
+            n = len(lista)  # a lista de participantes informa quantas pessoas falam
+        return lista, n
+
+    @app.post("/api/escolher-arquivo")
+    def escolher_arquivo(corpo: CorpoEscolher):
+        """Abre o seletor de arquivos NATIVO do Windows já na pasta entrada\\<perfil>.
+
+        (Um navegador não permite escolher a pasta inicial; como o painel roda neste PC, o servidor abre o diálogo.)
+        O caminho escolhido fica guardado no servidor e o navegador recebe só um token."""
+        if corpo.perfil not in PERFIS:
+            raise HTTPException(400, "Perfil inválido.")
+        inicial = cfg.entrada / corpo.perfil
+        inicial.mkdir(parents=True, exist_ok=True)
+        try:
+            r = subprocess.run([sys.executable, "-I", "-c", SCRIPT_SELETOR, str(inicial)], capture_output=True,
+                               text=True, encoding="utf-8", timeout=900,
+                               env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        except subprocess.TimeoutExpired:
+            raise HTTPException(408, "Tempo esgotado no seletor de arquivos.")
+        if r.returncode != 0:
+            raise HTTPException(501, "Seletor nativo indisponível; use o seletor do navegador.")
+        caminho = r.stdout.strip()
+        if not caminho:
+            return {"cancelado": True}
+        p = Path(caminho)
+        if not p.is_file() or p.suffix.lower() not in EXTENSOES_AUDIO:
+            raise HTTPException(400, "Escolha um arquivo de áudio.")
+        token = uuid.uuid4().hex
+        escolhas[token] = p
+        return {"token": token, "nome": p.name, "tamanho": p.stat().st_size,
+                "na_entrada": cfg.entrada.resolve() in p.resolve().parents}
+
+    @app.post("/api/jobs/escolhido")
+    def criar_de_escolhido(corpo: CorpoEscolhido):
+        """Cria o trabalho a partir de um arquivo escolhido no seletor nativo.
+        Arquivo dentro de entrada/ é usado no lugar (e movido para processados/ ao final, como sempre);
+        arquivo de qualquer outra pasta é COPIADO para dados/uploads, preservando o original."""
+        if corpo.perfil not in PERFIS:
+            raise HTTPException(400, "Perfil inválido.")
+        p = escolhas.pop(corpo.token, None)
+        if p is None or not p.is_file():
+            raise HTTPException(404, "Arquivo não encontrado; escolha-o novamente.")
+        lista, n = participantes_e_n(corpo.num_falantes, corpo.participantes)
+        dentro = cfg.entrada.resolve() in p.resolve().parents
+        if dentro:
+            audio, origem = p, "pasta"
+        else:
+            pasta = motor.dados / "uploads"
+            pasta.mkdir(parents=True, exist_ok=True)
+            audio = pasta / f"{time.strftime('%Y%m%d-%H%M%S')}_{exportar.nome_seguro(p.name)}"
+            shutil.copyfile(p, audio)
+            origem = "upload"
+        return {"id": motor.novo_job(p.name, corpo.perfil, audio, origem, n, lista)}
+
     @app.post("/api/jobs")
     async def criar_job(arquivo: UploadFile = File(...), perfil: str = Form(...),
                         num_falantes: str = Form("auto"), participantes: str = Form("[]")):
@@ -162,14 +250,7 @@ def criar_app(cfg: Config) -> FastAPI:
         nome = exportar.nome_seguro(Path(arquivo.filename or "audio").name)
         if Path(nome).suffix.lower() not in EXTENSOES_AUDIO:
             raise HTTPException(400, "Formato de áudio não suportado.")
-        try:
-            lista = [{"nome": str(p.get("nome", ""))[:120], "papel": str(p.get("papel", ""))[:60]}
-                     for p in json.loads(participantes)][:12]
-        except (ValueError, AttributeError):
-            raise HTTPException(400, "Participantes inválidos.")
-        n = int(num_falantes) if num_falantes.isdigit() and 1 <= int(num_falantes) <= 12 else None
-        if n is None and len(lista) > 1:
-            n = len(lista)  # a lista de participantes informa quantas pessoas falam
+        lista, n = participantes_e_n(num_falantes, participantes)
         pasta = motor.dados / "uploads"
         pasta.mkdir(parents=True, exist_ok=True)
         destino = pasta / f"{time.strftime('%Y%m%d-%H%M%S')}_{nome}"

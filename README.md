@@ -59,6 +59,9 @@ Dê duplo clique em **`Iniciar painel.bat`** (ou rode `.venv\Scripts\painel`). O
 `http://127.0.0.1:8765`.
 
 1. Escolha o **perfil**, envie o áudio e, se quiser, informe quantas pessoas falam, com nome e papel.
+   Ao clicar na área de envio abre o seletor de arquivos do Windows **já na pasta `entrada\<perfil>`**. Arquivo escolhido
+   ali é processado no lugar e movido para `processados\`; de qualquer outra pasta, é copiado e o original não é alterado.
+   (Arrastar e soltar um arquivo na área também funciona.)
 2. Acompanhe o andamento no painel da GPU. Vários arquivos entram numa fila (um por vez, por causa da VRAM).
 3. Abra a transcrição, confirme os falantes na aba **Falantes**, corrija o que precisar e gere o documento.
 4. Exporte para Word, Markdown ou Obsidian.
