@@ -36,10 +36,12 @@ Confira que a GPU é usada pelo PyTorch (deve imprimir `+cu128 True`):
 ## 3. Modelo de linguagem local
 
 ```powershell
-ollama pull qwen2.5:7b
+ollama pull qwen3:4b-instruct-2507-q4_K_M
 ```
 
-Cabe em 6 GB de VRAM. Outros modelos podem ser escolhidos em **Configurações** depois de baixados com `ollama pull`.
+Modelo padrão (2,5 GB): cabe inteiro em 6 GB de VRAM. Outros modelos podem ser escolhidos em **Configurações**
+depois de baixados com `ollama pull`. Em um teste com a mesma gravação de 49 min, `qwen2.5:7b`, `gemma3:4b` e este
+levaram 138–170 s; este foi o mais detalhado e o que mais cita tempos da gravação (`testes/comparar_modelos.py`).
 
 ## Modelos de falantes (uma vez)
 

@@ -16,7 +16,7 @@ from .pipeline import Cancelado, processar
 
 log = logging.getLogger("transcritor")
 
-PADRAO = {"ollama_modelo": "qwen2.5:7b", "obsidian_cofre": "", "obsidian_subpasta": "Transcrições",
+PADRAO = {"ollama_modelo": "qwen3:4b-instruct-2507-q4_K_M", "obsidian_cofre": "", "obsidian_subpasta": "Transcrições",
           "monitor_ativo": True}
 
 

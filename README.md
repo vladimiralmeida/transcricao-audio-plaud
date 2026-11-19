@@ -42,7 +42,7 @@ Passo a passo completo, incluindo a conta no Hugging Face: [docs/instalacao.md](
 winget install Python.Python.3.12
 winget install Gyan.FFmpeg.Essentials
 winget install Ollama.Ollama
-ollama pull qwen2.5:7b
+ollama pull qwen3:4b-instruct-2507-q4_K_M
 
 py -3.12 -m venv .venv
 .venv\Scripts\python -m pip install torch==2.11.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cu128
